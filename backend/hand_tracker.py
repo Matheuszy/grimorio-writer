@@ -1,24 +1,3 @@
-"""
-Grimório Interativo — Backend de visão computacional
-------------------------------------------------------
-Captura a webcam, detecta a mão com MediaPipe, identifica três gestos:
-  - "modo caneta": indicador esticado, demais dedos fechados -> escreve
-  - "virar página": movimento lateral rápido da mão aberta -> passa página
-  - "apagar página": punho fechado, mantido por alguns frames -> limpa a página atual
-
-Envia tudo (frame com landmarks desenhados + eventos de gesto) via WebSocket
-para o frontend (index.html) rodando no navegador.
-
-Instalação:
-    pip install -r requirements.txt
-
-Execução:
-    python hand_tracker.py
-
-Depois é só abrir o frontend/index.html no navegador. Ele conecta
-automaticamente em ws://localhost:8765
-"""
-
 import asyncio
 import base64
 import json
@@ -29,16 +8,17 @@ import cv2
 import mediapipe as mp
 import websockets
 
+
 CAM_INDEX = 0
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
-JPEG_QUALITY = 60          # qualidade do frame enviado ao navegador (0-100)
-SWIPE_HISTORY_SIZE = 8     # quantos frames usamos para detectar o swipe
-SWIPE_THRESHOLD = 0.28     # deslocamento horizontal normalizado para virar página
-SWIPE_COOLDOWN = 0.8       # segundos de espera entre uma virada de página e outra
+JPEG_QUALITY = 60
+SWIPE_HISTORY_SIZE = 8
+SWIPE_THRESHOLD = 0.28
+SWIPE_COOLDOWN = 0.8
 
-FIST_HOLD_FRAMES = 10      # frames seguidos de punho fechado para confirmar o gesto
-CLEAR_COOLDOWN = 1.5       # segundos de espera entre um "apagar" e outro
+FIST_HOLD_FRAMES = 10
+CLEAR_COOLDOWN = 1.5
 
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
@@ -84,11 +64,11 @@ class HandGrimorio:
         return all(self._finger_extended(landmarks, t, p) for t, p in fingers)
 
     def detect_closed_fist(self, landmarks):
-        # os 4 dedos longos fechados...
+
         fingers_curled = [(8, 6), (12, 10), (16, 14), (20, 18)]
         if any(self._finger_extended(landmarks, t, p) for t, p in fingers_curled):
             return False
-        # ...e o polegar recolhido para perto da palma (não esticado para o lado)
+
         thumb_tip = landmarks[4]
         index_mcp = landmarks[5]
         pinky_mcp = landmarks[17]
@@ -130,8 +110,7 @@ class HandGrimorio:
         if abs(delta) >= SWIPE_THRESHOLD:
             self.last_swipe_time = now
             self.wrist_history.clear()
-            # Câmera é espelhada no frontend, então invertemos o sinal
-            # para casar com a percepção natural de "arrastar para a direita".
+
             return "next_page" if delta > 0 else "prev_page"
         return None
 
@@ -156,7 +135,7 @@ class HandGrimorio:
                 await asyncio.sleep(0.01)
                 continue
 
-            frame = cv2.flip(frame, 1)  # espelha, fica mais natural
+            frame = cv2.flip(frame, 1)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             result = self.hands.process(rgb)
 
@@ -187,7 +166,7 @@ class HandGrimorio:
             else:
                 self.fist_frame_count = 0
 
-            # Codifica o frame como JPEG -> base64 para mandar ao navegador
+
             ok, buf = cv2.imencode(
                 ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY]
             )
@@ -217,7 +196,7 @@ class HandGrimorio:
             print(f"[-] Frontend desconectado ({len(self.clients)} cliente(s))")
 
     async def run(self):
-        async with websockets.serve(self.handler, "localhost", 8765):
+        async with websockets.serve(self.handler, "0.0.0.0", 8765):
             print("Servidor WebSocket rodando em ws://localhost:8765")
             print("Abra frontend/index.html no navegador para ver o grimório.")
             await self.camera_loop()
