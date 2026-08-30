@@ -1,0 +1,14 @@
+  services:
+    backend:
+      build: ./backend
+      ports:
+        - "8765:8765"
+      devices:
+        - /dev/video0:/dev/video0
+
+    frontend:
+      build: ./frontend
+      ports:
+        - "8080:80"
+      depends_on:
+        - backend
