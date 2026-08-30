@@ -1,9 +1,10 @@
 """
 Grimório Interativo — Backend de visão computacional
 ------------------------------------------------------
-Captura a webcam, detecta a mão com MediaPipe, identifica dois gestos:
+Captura a webcam, detecta a mão com MediaPipe, identifica três gestos:
   - "modo caneta": indicador esticado, demais dedos fechados -> escreve
   - "virar página": movimento lateral rápido da mão aberta -> passa página
+  - "apagar página": punho fechado, mantido por alguns frames -> limpa a página atual
 
 Envia tudo (frame com landmarks desenhados + eventos de gesto) via WebSocket
 para o frontend (index.html) rodando no navegador.
@@ -28,8 +29,6 @@ import cv2
 import mediapipe as mp
 import websockets
 
-# ----------------------------- Configurações -----------------------------
-
 CAM_INDEX = 0
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
@@ -37,6 +36,9 @@ JPEG_QUALITY = 60          # qualidade do frame enviado ao navegador (0-100)
 SWIPE_HISTORY_SIZE = 8     # quantos frames usamos para detectar o swipe
 SWIPE_THRESHOLD = 0.28     # deslocamento horizontal normalizado para virar página
 SWIPE_COOLDOWN = 0.8       # segundos de espera entre uma virada de página e outra
+
+FIST_HOLD_FRAMES = 10      # frames seguidos de punho fechado para confirmar o gesto
+CLEAR_COOLDOWN = 1.5       # segundos de espera entre um "apagar" e outro
 
 mp_hands = mp.solutions.hands
 mp_drawing = mp.solutions.drawing_utils
@@ -58,9 +60,11 @@ class HandGrimorio:
 
         self.wrist_history = deque(maxlen=SWIPE_HISTORY_SIZE)
         self.last_swipe_time = 0.0
+        self.fist_frame_count = 0
+        self.last_clear_time = 0.0
         self.clients = set()
 
-    # ------------------------- Lógica de gestos -------------------------
+
 
     @staticmethod
     def _finger_extended(landmarks, tip_id, pip_id):
@@ -78,6 +82,35 @@ class HandGrimorio:
     def detect_open_hand(self, landmarks):
         fingers = [(8, 6), (12, 10), (16, 14), (20, 18)]
         return all(self._finger_extended(landmarks, t, p) for t, p in fingers)
+
+    def detect_closed_fist(self, landmarks):
+        # os 4 dedos longos fechados...
+        fingers_curled = [(8, 6), (12, 10), (16, 14), (20, 18)]
+        if any(self._finger_extended(landmarks, t, p) for t, p in fingers_curled):
+            return False
+        # ...e o polegar recolhido para perto da palma (não esticado para o lado)
+        thumb_tip = landmarks[4]
+        index_mcp = landmarks[5]
+        pinky_mcp = landmarks[17]
+        hand_span = abs(index_mcp.x - pinky_mcp.x) + 1e-6
+        thumb_to_palm = abs(thumb_tip.x - index_mcp.x)
+        return thumb_to_palm < hand_span * 1.1
+
+    def detect_clear_gesture(self, landmarks):
+        now = time.time()
+        if self.detect_closed_fist(landmarks):
+            self.fist_frame_count += 1
+        else:
+            self.fist_frame_count = 0
+            return None
+
+        if (
+                self.fist_frame_count == FIST_HOLD_FRAMES
+                and now - self.last_clear_time >= CLEAR_COOLDOWN
+        ):
+            self.last_clear_time = now
+            return "clear_page"
+        return None
 
     def detect_swipe(self, landmarks):
         wrist_x = landmarks[0].x
@@ -102,7 +135,7 @@ class HandGrimorio:
             return "next_page" if delta > 0 else "prev_page"
         return None
 
-    # --------------------------- Loop principal --------------------------
+
 
     async def broadcast(self, message: dict):
         if not self.clients:
@@ -148,7 +181,11 @@ class HandGrimorio:
                     tip = landmarks[8]
                     fingertip = {"x": tip.x, "y": tip.y}
 
-                gesture = self.detect_swipe(landmarks)
+                gesture = self.detect_clear_gesture(landmarks)
+                if gesture is None:
+                    gesture = self.detect_swipe(landmarks)
+            else:
+                self.fist_frame_count = 0
 
             # Codifica o frame como JPEG -> base64 para mandar ao navegador
             ok, buf = cv2.imencode(
