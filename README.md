@@ -11,7 +11,14 @@ grimorio/
 │   ├── hand_tracker.py     # captura webcam, detecta gestos, serve WebSocket
 │   └── requirements.txt
 └── frontend/
-    └── index.html          # o livro (visual + lógica de desenho/página)
+    ├── index.html          # só a estrutura da página
+    ├── style.css           # aparência (livro, câmera, status)
+    └── js/
+        ├── book.js         # páginas do livro e navegação entre elas
+        ├── drawing.js      # traço de tinta + teste manual com o mouse
+        ├── keyboard.js     # atalhos de teclado (setas, C) para teste
+        ├── connection.js   # WebSocket com o backend + status/câmera na tela
+        └── main.js         # inicializa os módulos acima, nessa ordem
 ```
 
 ## Como testar
